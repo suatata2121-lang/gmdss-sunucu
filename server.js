@@ -24,7 +24,6 @@ io.on('connection', (socket) => {
     // ==========================================
     socket.on('register', (data) => {
         if (data && data.mmsi) {
-            // Verileri garanti altına alıyoruz (String'e çevirip boşlukları siliyoruz)
             activeVessels[socket.id] = {
                 socketId: socket.id,
                 name: data.name,
@@ -36,7 +35,6 @@ io.on('connection', (socket) => {
     });
 
     // --- YENİ EKLENEN: VHF DSC Cihaz Kaydı ---
-    // (Yeni cihaz frontend'den 'register_device' atıyordu, onu da ağa tanıtıyoruz)
     socket.on('register_device', (data) => {
         if (data && data.mmsi) {
             activeVessels[socket.id] = {
@@ -53,7 +51,6 @@ io.on('connection', (socket) => {
     // 2. MEVCUT HABERLEŞME MOTORU (INMARSAT / TELEX)
     // ==========================================
     socket.on('network_message', (msg) => {
-        // Gelen paketteki hedef numarayı güvenlik çemberinden geçirip temizliyoruz
         let senderName = msg.fromName || "Bilinmeyen";
         let targetId = msg.toId ? String(msg.toId).trim() : "Bilinmeyen";
         let protocol = msg.protocol ? String(msg.protocol).trim() : "";
@@ -67,7 +64,6 @@ io.on('connection', (socket) => {
 
         let targetSocketId = null;
 
-        // Akıllı Eşleştirme Motoru
         for (let id in activeVessels) {
             let vessel = activeVessels[id];
             
@@ -96,12 +92,10 @@ io.on('connection', (socket) => {
     socket.on('send_dsc_call', (data) => {
         console.log(`[VHF DSC SİNYALİ] Kime: ${data.to} | Kanal: ${data.channel}`);
         
-        // Eğer çağrı "Tüm Gemiler"e ise herkese (broadcast) yolla
         if (data.to === "ALL" || data.to === "ALL SHIPS") {
             socket.broadcast.emit('receive_dsc_call', data);
             console.log(`[BAŞARILI] ALL SHIPS çağrısı filoya yayınlandı.`);
         } 
-        // Bireysel bir MMSI'ye ise, sistemde o MMSI'yi bul ve sadece ona ilet
         else {
             let targetSocketId = null;
             let targetMmsi = String(data.to).trim();
@@ -122,6 +116,28 @@ io.on('connection', (socket) => {
         }
     });
 
+    // **!!! EKSİK OLAN VE YENİ EKLENEN BÖLÜM BURASI !!!**
+    // Çağrı kabul edildiğinde (ACK) onayı arayan gemiye geri ilet
+    socket.on('send_ack', (data) => {
+        let targetMmsi = String(data.to).trim();
+        let targetSocketId = null;
+
+        for (let id in activeVessels) {
+            if (activeVessels[id].mmsi === targetMmsi) {
+                targetSocketId = activeVessels[id].socketId;
+                break;
+            }
+        }
+
+        if (targetSocketId) {
+            io.to(targetSocketId).emit('receive_ack', data);
+            console.log(`[ACK BAŞARILI] Onay sinyali ${targetMmsi} hedefine iletildi.`);
+        } else {
+            console.log(`[ACK BAŞARISIZ] Onay hedefi (${targetMmsi}) bulunamadı.`);
+        }
+    });
+    // **!!! YENİ EKLENEN BÖLÜM BİTİŞİ !!!**
+
     // B. Tehlike (DISTRESS) İkazı (Doğrudan tüm filoya yayınlanır)
     socket.on('send_distress', (data) => {
         console.log(`[!!! MAYDAY !!!] MMSI: ${data.from} | Tür: ${data.nature}`);
@@ -130,7 +146,6 @@ io.on('connection', (socket) => {
 
     // C. PTT ve GERÇEK SES (AUDIO) İletimi (Tüm filoya yayınlanır, cihazlar kanalına göre filtreler)
     socket.on('audio_stream', (data) => {
-        // Sesi gönderen cihaz (socket) HARİÇ, ağdaki diğer herkese ses paketini yolla
         socket.broadcast.emit('audio_stream', data);
     });
 
